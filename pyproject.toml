@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "instagram-post-mcp"
+version = "0.1.0"
+description = "MCP Server enabling AI agents to publish AI-generated images, carousels, and stories to Instagram"
+authors = [{ name = "Agent Developer" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.3.0",
+    "httpx>=0.28.0",
+    "pillow>=11.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.10.0"
+]
+
+[project.scripts]
+instagram-mcp = "instagram_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["instagram_mcp*"]
