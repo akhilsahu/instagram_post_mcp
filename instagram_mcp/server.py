@@ -88,7 +88,8 @@ async def post_image(
     caption: str = "",
     auto_format: bool = True,
     fit_mode: str = "pad",
-    location_id: Optional[str] = None
+    location_id: Optional[str] = None,
+    dry_run: bool = False
 ) -> str:
     """
     Publish a single image to an Instagram Business or Creator account feed.
@@ -99,11 +100,34 @@ async def post_image(
         auto_format: If True (recommended for AI images), automatically adjusts aspect ratio to Instagram feed limits (between 4:5 and 1.91:1) and converts to RGB JPEG.
         fit_mode: How to adjust aspect ratio if outside 4:5 - 1.91:1. 'pad' adds a stylish blurred background border (preserves entire artwork), 'crop' center-crops the image.
         location_id: Optional Facebook Page ID for location tagging.
+        dry_run: If True (or if DRY_RUN=true in .env), processes and formats the image without calling Meta API, simulating a successful post.
 
     Returns:
         JSON string containing the post result: permalink, post_id, and status.
     """
     try:
+        is_dry_run = dry_run or settings.dry_run
+
+        if is_dry_run:
+            # Process image and return dry-run simulation
+            local_prep = prepare_for_instagram(
+                image_source,
+                target_type="feed",
+                fit_mode=fit_mode
+            )
+            processed_img, _ = load_image(str(local_prep))
+            analysis = analyze_image(processed_img)
+            return json.dumps({
+                "status": "dry_run_success",
+                "message": "[DRY RUN] Image formatted and verified successfully! Meta publishing was simulated.",
+                "simulated_post_id": "18099887766554433",
+                "simulated_permalink": "https://www.instagram.com/p/DRYRUN_SAMPLE/",
+                "caption": caption,
+                "processed_image_file": str(local_prep),
+                "image_analysis": analysis,
+                "hint": "Set valid INSTAGRAM_ACCESS_TOKEN and call with dry_run=False to post live to Instagram."
+            }, indent=2)
+
         settings.validate_meta_credentials()
 
         # Step 1: Ensure image is in valid format and get public HTTPS URL
@@ -159,7 +183,8 @@ async def post_carousel(
     caption: str = "",
     auto_format: bool = True,
     fit_mode: str = "pad",
-    location_id: Optional[str] = None
+    location_id: Optional[str] = None,
+    dry_run: bool = False
 ) -> str:
     """
     Publish a multi-image carousel post (2 to 10 images) to Instagram.
@@ -170,6 +195,7 @@ async def post_carousel(
         auto_format: If True, automatically optimizes each image for Instagram dimensions and format.
         fit_mode: 'pad' (blurred padding) or 'crop' (center crop).
         location_id: Optional Facebook Page ID for location tagging.
+        dry_run: If True (or if DRY_RUN=true in .env), processes and formats all images without calling Meta API, simulating a successful carousel post.
 
     Returns:
         JSON string with carousel post ID and permalink.
@@ -185,6 +211,27 @@ async def post_carousel(
                 "status": "error",
                 "message": "Instagram carousels support a maximum of 10 images."
             })
+
+        is_dry_run = dry_run or settings.dry_run
+
+        if is_dry_run:
+            processed_items = []
+            for img_src in images:
+                local_prep = prepare_for_instagram(img_src, target_type="feed", fit_mode=fit_mode)
+                p_img, _ = load_image(str(local_prep))
+                processed_items.append({
+                    "file_path": str(local_prep),
+                    **analyze_image(p_img)
+                })
+            return json.dumps({
+                "status": "dry_run_success",
+                "message": f"[DRY RUN] Carousel with {len(images)} images formatted and verified! Meta publishing simulated.",
+                "simulated_post_id": "18099887766554499",
+                "simulated_permalink": "https://www.instagram.com/p/DRYRUN_CAROUSEL/",
+                "caption": caption,
+                "items": processed_items,
+                "hint": "Set valid INSTAGRAM_ACCESS_TOKEN and call with dry_run=False to post live to Instagram."
+            }, indent=2)
 
         settings.validate_meta_credentials()
 
@@ -243,7 +290,8 @@ async def post_carousel(
 async def post_story(
     image_source: str,
     auto_format: bool = True,
-    fit_mode: str = "pad"
+    fit_mode: str = "pad",
+    dry_run: bool = False
 ) -> str:
     """
     Publish an image to Instagram Stories (vertical 9:16 format, disappears after 24 hours).
@@ -252,11 +300,31 @@ async def post_story(
         image_source: Path to local image file, base64 data, or HTTPS URL.
         auto_format: Automatically formats image to 9:16 vertical story aspect ratio.
         fit_mode: 'pad' (blurred padding) or 'crop' (center crop).
+        dry_run: If True (or if DRY_RUN=true in .env), formats the story image without calling Meta API, simulating a successful story upload.
 
     Returns:
         JSON string with story publication status.
     """
     try:
+        is_dry_run = dry_run or settings.dry_run
+
+        if is_dry_run:
+            local_prep = prepare_for_instagram(
+                image_source,
+                target_type="story",
+                fit_mode=fit_mode
+            )
+            processed_img, _ = load_image(str(local_prep))
+            analysis = analyze_image(processed_img)
+            return json.dumps({
+                "status": "dry_run_success",
+                "message": "[DRY RUN] Story image formatted to 9:16 vertical ratio! Meta publishing simulated.",
+                "simulated_story_id": "18099887766554477",
+                "processed_image_file": str(local_prep),
+                "image_analysis": analysis,
+                "hint": "Set valid INSTAGRAM_ACCESS_TOKEN and call with dry_run=False to post live to Instagram."
+            }, indent=2)
+
         settings.validate_meta_credentials()
 
         public_url = await _resolve_image_to_url(
@@ -440,3 +508,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

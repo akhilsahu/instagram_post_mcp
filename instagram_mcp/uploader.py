@@ -151,3 +151,4 @@ async def get_public_image_url(image_path: Path) -> str:
         f"Failed to host image for Instagram Graph API. Errors: {'; '.join(errors)}. "
         "Tip: Set IMGBB_API_KEY or CLOUDINARY credentials in .env for dedicated image hosting."
     )
+

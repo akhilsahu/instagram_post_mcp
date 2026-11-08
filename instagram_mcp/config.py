@@ -26,15 +26,18 @@ class Settings:
 
     # Processing configuration
     auto_format_images: bool = os.getenv("AUTO_FORMAT_IMAGES", "true").lower() in ("true", "1", "yes")
+    dry_run: bool = os.getenv("DRY_RUN", "false").lower() in ("true", "1", "yes")
     temp_dir: Path = Path(os.getenv("INSTA_TEMP_DIR", "/tmp/insta_mcp"))
 
     def validate_meta_credentials(self) -> None:
         """Check if minimum required credentials for Graph API are present."""
-        if not self.access_token:
+        if not self.access_token and not self.dry_run:
             raise ValueError(
-                "INSTAGRAM_ACCESS_TOKEN is not set. Please set it in your .env file or environment variables."
+                "INSTAGRAM_ACCESS_TOKEN is not set. Please set it in your .env file or environment variables. "
+                "(Or enable dry-run mode via dry_run=True / DRY_RUN=true to simulate posting)."
             )
 
 
 settings = Settings()
 settings.temp_dir.mkdir(parents=True, exist_ok=True)
+

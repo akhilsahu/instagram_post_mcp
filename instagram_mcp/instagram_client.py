@@ -87,25 +87,61 @@ class InstagramClient:
 
         return res_json
 
+    async def list_available_instagram_accounts(self) -> List[Dict[str, Any]]:
+        """
+        Discovers all Instagram Business/Creator accounts accessible with this token.
+        Supports both Page tokens and User tokens.
+        """
+        self._ensure_token()
+        found_accounts: Dict[str, Dict[str, Any]] = {}
+
+        # Strategy 1: Inspect token via /debug_token to get scoped target IDs
+        try:
+            debug_res = await self._request(
+                "GET",
+                "debug_token",
+                params={"input_token": self.access_token}
+            )
+            data = debug_res.get("data", {})
+            for scope_info in data.get("granular_scopes", []):
+                if scope_info.get("scope") in ("instagram_content_publish", "instagram_basic"):
+                    for target_id in scope_info.get("target_ids", []):
+                        if target_id not in found_accounts:
+                            found_accounts[target_id] = {"id": target_id}
+        except Exception:
+            pass
+
+        # Strategy 2: Query /me/accounts (works when token is a User token)
+        try:
+            res = await self._request("GET", "me/accounts", params={"fields": "id,name,instagram_business_account{id,username}"})
+            for page in res.get("data", []):
+                ig = page.get("instagram_business_account")
+                if ig and "id" in ig:
+                    found_accounts[ig["id"]] = {"id": ig["id"], "username": ig.get("username")}
+        except Exception:
+            pass
+
+        # Enrich accounts with profile info
+        results = []
+        for account_id in found_accounts:
+            try:
+                profile = await self._request("GET", account_id, params={"fields": "id,username,name,followers_count,media_count"})
+                results.append(profile)
+            except Exception:
+                results.append({"id": account_id, "username": "unknown"})
+
+        return results
+
     async def get_account_id(self) -> str:
         """
         Returns the Instagram Business/Creator Account ID.
-        If not set in .env, automatically discovers it from the access token via Facebook Pages.
+        If not set in .env, automatically discovers it from the access token.
         """
         if self.account_id:
             return self.account_id
 
-        # Query /me/accounts to find connected Facebook Pages with linked Instagram accounts
-        res = await self._request("GET", "me/accounts", params={"fields": "id,name,instagram_business_account{id,username}"})
-        pages = res.get("data", [])
-        
-        found_accounts = []
-        for page in pages:
-            ig_account = page.get("instagram_business_account")
-            if ig_account and "id" in ig_account:
-                found_accounts.append((ig_account["id"], ig_account.get("username", "unknown")))
-
-        if not found_accounts:
+        accounts = await self.list_available_instagram_accounts()
+        if not accounts:
             raise InstagramAPIError(
                 "Could not auto-detect an Instagram Business/Creator Account ID for this token. "
                 "Ensure your Instagram account is switched to Business or Creator and connected to a Facebook Page, "
@@ -113,7 +149,7 @@ class InstagramClient:
             )
 
         # Cache the first detected account ID
-        self.account_id = found_accounts[0][0]
+        self.account_id = accounts[0]["id"]
         return self.account_id
 
     async def get_profile(self) -> Dict[str, Any]:
@@ -252,3 +288,4 @@ class InstagramClient:
             params={"fields": fields, "limit": limit}
         )
         return res.get("data", [])
+

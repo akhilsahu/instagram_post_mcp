@@ -4,3 +4,4 @@ Model Context Protocol server for publishing AI-generated images and carousels t
 """
 
 __version__ = "0.1.0"
+

@@ -39,48 +39,32 @@ async def check_credentials_and_account():
 
     client = InstagramClient()
 
-    # Step A: Test /me endpoint
-    print("\nConnecting to Meta Graph API (/me)...")
+    # Step A: Validate token and discover connected accounts
+    print("\nValidating token and querying connected Instagram accounts...")
     try:
-        me_info = await client._request("GET", "me", params={"fields": "id,name"})
-        print(f"✅ Connected to Meta User: {me_info.get('name')} (ID: {me_info.get('id')})")
-    except InstagramAPIError as e:
-        print(f"❌ [FAILED] Unable to query /me: {e}")
-        return False
+        accounts = await client.list_available_instagram_accounts()
+        if not accounts:
+            print("❌ [FAILED] No Instagram Business/Creator accounts found for this token.")
+            print("   Make sure your Instagram account is switched to Business or Creator and linked to your Facebook Page.")
+            return False
 
-    # Step B: Auto-detect or verify Instagram Account
-    print("\nSearching for linked Instagram Business/Creator accounts...")
-    try:
-        pages_res = await client._request(
-            "GET",
-            "me/accounts",
-            params={"fields": "id,name,instagram_business_account{id,username,name}"}
-        )
-        pages = pages_res.get("data", [])
-        if not pages:
-            print("⚠️ No Facebook Pages found on this user account.")
-        else:
-            print(f"Found {len(pages)} Facebook Page(s):")
-            for p in pages:
-                ig = p.get("instagram_business_account")
-                if ig:
-                    print(f"   - Page: {p.get('name')} -> Linked Instagram: @{ig.get('username')} (ID: {ig.get('id')})")
-                else:
-                    print(f"   - Page: {p.get('name')} (No Instagram account linked to this page)")
+        print(f"✅ Found {len(accounts)} Instagram Business Account(s):")
+        for idx, acc in enumerate(accounts, 1):
+            is_active = (acc["id"] == settings.account_id) or (not settings.account_id and idx == 1)
+            marker = " (SELECTED IN .ENV)" if is_active else ""
+            print(f"   {idx}. @{acc.get('username', 'unknown')} (ID: {acc.get('id')}){marker}")
+            print(f"      Name: {acc.get('name', 'N/A')}")
+            print(f"      Followers: {acc.get('followers_count', 0)} | Media posts: {acc.get('media_count', 0)}")
 
-        account_id = await client.get_account_id()
-        print(f"\n✅ Active Instagram Account ID: {account_id}")
+        active_id = await client.get_account_id()
+        print(f"\n✅ Active Instagram Account ID: {active_id}")
 
         profile = await client.get_profile()
-        print("✅ Account Profile Verified:")
-        print(f"   - Username: @{profile.get('username')}")
-        print(f"   - Name: {profile.get('name')}")
-        print(f"   - Followers: {profile.get('followers_count', 'N/A')}")
-        print(f"   - Media count: {profile.get('media_count', 'N/A')}")
+        print(f"✅ Ready to post as: @{profile.get('username')}")
         return True
 
-    except InstagramAPIError as e:
-        print(f"❌ [FAILED] Error fetching Instagram account: {e}")
+    except Exception as e:
+        print(f"❌ [FAILED] Error inspecting token or Instagram account: {e}")
         return False
 
 
@@ -141,3 +125,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
