@@ -37,9 +37,10 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that a
   - Offers **smart padding** (with a stylish blurred background of the artwork) or **center-cropping**.
   - Converts RGBA transparency to Instagram-compliant RGB JPEG.
   - Compresses images if they exceed Meta's 8MB limit.
+- **Conversational "Generate & Post" Workflow**: Ask your chat agent to generate an image, then simply say *"Now post this image to Instagram"*. The MCP automatically detects the freshly generated visual (`image_source="latest"`) without requiring manual path lookups.
 - **Typographic Caption Overlays**: Render clean lower-third typographic banners directly onto your image visual (crucial for Instagram Stories, which do not have native API caption fields).
-- **Seamless Local File Support**: Meta Graph API strictly requires public HTTPS URLs. This server handles local files (`/path/to/artwork.png`), base64 strings, or remote URLs:
-  - **Zero-config fallback**: Uses temporary public hosting out-of-the-box (`tmpfiles.org` / `litterbox`).
+- **Direct CDN Image Bridge (Zero-Config)**: Meta Graph API strictly requires public HTTPS URLs. This server handles local files (`/path/to/artwork.png`), base64 strings, or remote URLs:
+  - **Zero-config CDN bridge**: Uploads via `freeimage.host` / `iili.io` CDN, verified to pass Meta's crawler (`facebookexternalhit/1.1`) without Cloudflare / bot-protection blocks.
   - **Dedicated storage**: Direct integration with [ImgBB](https://api.imgbb.com/) or [Cloudinary](https://cloudinary.com/).
 - **Multi-Account Auto-Discovery**: Automatically discovers all linked Instagram accounts from your token without needing manual ID lookups.
 - **Multiple Post Formats**: Single photo posts, multi-image carousels (2–10 images), and 9:16 vertical stories.
@@ -51,9 +52,10 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that a
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `post_image` | Publish a single image to Instagram feed | `image_source`, `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
+| `post_image` | Publish a single image to Instagram feed (defaults to most recent generated visual) | `image_source` (default: `"latest"`), `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
 | `post_carousel` | Publish 2–10 images as a swipeable carousel | `images`, `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
-| `post_story` | Publish an image to Instagram Stories (9:16) | `image_source`, `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
+| `post_story` | Publish an image to Instagram Stories (9:16) | `image_source` (default: `"latest"`), `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
+| `get_latest_image` | Inspect the most recently generated visual on the system | *None* |
 | `format_caption` | Format & validate caption and hashtags (2,200 char limit) | `text`, `hashtags`, `call_to_action` |
 | `format_and_preview_image` | Validate & prepare image locally without publishing | `image_source`, `caption_overlay`, `target_type`, `fit_mode`, `output_path` |
 | `get_instagram_profile` | Get connected Instagram account details | *None* |
@@ -167,26 +169,28 @@ Replace `/PATH/TO/instagram_post_mcp` with the absolute path to your cloned repo
 
 ### 1. Google Gemini / Antigravity IDE
 
-Antigravity loads MCP servers from `~/.gemini/config/mcp_config.json`.
+#### Method A: Via Config File (Recommended)
+Add to your global config at `~/.gemini/config/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "instagram": {
+      "command": "/PATH/TO/instagram_post_mcp/start_mcp.sh",
+      "args": []
+    }
+  }
+}
+```
 
-1. Open or create `~/.gemini/config/mcp_config.json`:
-   ```bash
-   nano ~/.gemini/config/mcp_config.json
-   ```
-2. Add the `instagram` server entry:
-   ```json
-   {
-     "mcpServers": {
-       "instagram": {
-         "command": "/PATH/TO/instagram_post_mcp/.venv/bin/python",
-         "args": [
-           "/PATH/TO/instagram_post_mcp/run_server.py"
-         ]
-       }
-     }
-   }
-   ```
-3. Restart or reload Gemini. The agent will now discover `post_image`, `post_carousel`, `post_story`, etc.
+#### Method B: Via Connected Apps UI
+1. Open **Settings** > **Connected Apps** > **+ Custom** > **Set up a custom connected app**.
+2. Select **Local MCP**.
+3. Fill in the fields:
+   - **Server name**: `Instagram Poster`
+   - **Description**: `Publishes AI images and carousels to Instagram`
+   - **Command**: `/PATH/TO/instagram_post_mcp/start_mcp.sh`
+   - **Sandbox settings**: Change from `Default` to **`Unsandboxed`** *(Critical: allows Python execution and network access to Meta Graph API)*.
+4. Click **Next** > **Finish**.
 
 ---
 
@@ -333,7 +337,17 @@ Publishes a real test graphic to your Instagram feed:
 
 ## 💡 How an AI Agent Uses It
 
-### 1. Single Feed Image Post
+### 1. Conversational "Generate & Post" (Zero Path Needed!)
+You can simply talk to your AI agent naturally:
+> **User**: *"Generate an image of a cybernetic tiger in a rain-slicked Tokyo alley."*  
+> **Agent**: *(Generates image and presents it)*  
+> **User**: *"Awesome, now post this image to my Instagram with a cool caption."*  
+> **Agent**: Calls `post_image(image_source="latest", caption="Neon predators of 2099... 🐅⚡ #Cyberpunk #DigitalArt")`.  
+> The server automatically detects the newly created image, applies 4:5 padding, hosts it, and returns the live post URL!
+
+---
+
+### 2. Explicit File or URL Post
 ```json
 {
   "image_source": "/Users/aks/images/cyberpunk_cat.png",
@@ -343,7 +357,7 @@ Publishes a real test graphic to your Instagram feed:
 }
 ```
 
-### 2. Multi-Image Carousel
+### 3. Multi-Image Carousel
 ```json
 {
   "images": [
@@ -355,10 +369,10 @@ Publishes a real test graphic to your Instagram feed:
 }
 ```
 
-### 3. Instagram Story (with Typographic Overlay)
+### 4. Instagram Story (with Typographic Overlay)
 ```json
 {
-  "image_source": "/Users/aks/images/morning_render.png",
+  "image_source": "latest",
   "caption": "Daily Inspiration ✨ #StoryOfTheDay",
   "auto_format": true,
   "fit_mode": "crop"
@@ -376,15 +390,19 @@ instagram_post_mcp/
 ├── pyproject.toml               # Package configuration
 ├── requirements.txt             # Python dependencies
 ├── run_server.py                # Executable stdio entrypoint for MCP clients
+├── start_mcp.sh                 # Self-contained launcher script for IDEs
 ├── verify_setup.py              # CLI diagnostic test script
 ├── publish_test_post.py         # Test publishing helper script
 ├── example_agent_workflow.py    # End-to-end agent workflow simulation
 ├── README.md                    # Documentation
+├── tests/                       # Automated test suite
+│   ├── test_image_processor.py  # Aspect ratio and overlay tests
+│   └── test_server_tools.py     # Tool execution and caption tests
 └── instagram_mcp/
     ├── __init__.py
     ├── config.py                # Environment and settings loader
     ├── image_processor.py       # Aspect ratio formatter, PIL resizer & text overlay
-    ├── uploader.py              # Temporary & cloud image hosting adapters
+    ├── uploader.py              # iili.io, ImgBB, and Cloudinary hosting adapters
     ├── instagram_client.py      # Meta Instagram Graph API client
     └── server.py                # FastMCP server & tool definitions
 ```
