@@ -1,5 +1,6 @@
 import os
 import time
+import base64
 import hashlib
 import httpx
 from pathlib import Path
@@ -11,6 +12,38 @@ from instagram_mcp.config import settings
 class UploadError(Exception):
     """Raised when an image upload fails."""
     pass
+
+
+async def upload_to_freeimage(image_path: Path) -> str:
+    """
+    Uploads to freeimage.host (backed by iili.io CDN).
+    Returns a direct image URL accessible by Meta's crawler without Cloudflare challenges.
+    """
+    url = "https://freeimage.host/api/1/upload"
+    with open(image_path, "rb") as f:
+        b64_content = base64.b64encode(f.read()).decode("utf-8")
+
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        data = {
+            "key": "6d207e02198a847aa98d0a2a901485a5",  # Public API key
+            "action": "upload",
+            "source": b64_content,
+            "format": "json"
+        }
+        response = await client.post(url, data=data)
+
+    if response.status_code != 200:
+        raise UploadError(f"freeimage.host upload failed ({response.status_code}): {response.text}")
+
+    try:
+        res_data = response.json()
+    except Exception:
+        raise UploadError(f"freeimage.host invalid JSON response: {response.text}")
+
+    if res_data.get("status_code") != 200 or not res_data.get("image"):
+        raise UploadError(f"freeimage.host upload error: {res_data}")
+
+    return res_data["image"]["url"]
 
 
 async def upload_to_imgbb(image_path: Path, api_key: str) -> str:
@@ -135,13 +168,19 @@ async def get_public_image_url(image_path: Path) -> str:
         except Exception as e:
             errors.append(f"ImgBB error: {e}")
             
-    # 3. Tmpfiles fallback (zero configuration required)
+    # 3. FreeImage.host fallback (zero-config, iili.io direct CDN, never Cloudflare-blocked)
+    try:
+        return await upload_to_freeimage(image_path)
+    except Exception as e:
+        errors.append(f"freeimage.host error: {e}")
+
+    # 4. Tmpfiles fallback
     try:
         return await upload_to_tmpfiles(image_path)
     except Exception as e:
         errors.append(f"tmpfiles error: {e}")
-        
-    # 4. Litterbox fallback
+
+    # 5. Litterbox fallback
     try:
         return await upload_to_litterbox(image_path)
     except Exception as e:
