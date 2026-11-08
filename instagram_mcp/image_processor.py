@@ -23,12 +23,50 @@ class ImageProcessingError(Exception):
     pass
 
 
-def load_image(image_input: Union[str, bytes, Path, io.BytesIO]) -> Tuple[Image.Image, Optional[str]]:
+def find_latest_image() -> Optional[Path]:
     """
-    Loads an image from a file path, base64 string, or raw bytes.
+    Searches common temporary, workspace, and download locations for the most
+    recently created or modified image file.
+    """
+    candidates = []
+    search_dirs = [
+        settings.temp_dir,
+        Path("/tmp"),
+        Path.cwd(),
+        Path.home() / "Downloads",
+        Path.home() / "Pictures"
+    ]
+    extensions = ("*.png", "*.jpg", "*.jpeg", "*.webp")
+    for d in search_dirs:
+        if d.exists() and d.is_dir():
+            for ext in extensions:
+                try:
+                    for f in d.glob(ext):
+                        if f.is_file() and f.stat().st_size > 500:
+                            candidates.append((f.stat().st_mtime, f))
+                except Exception:
+                    continue
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+def load_image(image_input: Union[str, bytes, Path, io.BytesIO, None]) -> Tuple[Image.Image, Optional[str]]:
+    """
+    Loads an image from a file path, base64 string, raw bytes, or auto-detects
+    the most recently generated image if 'latest' or None is passed.
     Returns (PIL.Image, source_name).
     """
     try:
+        # Auto-detect latest image if requested or omitted
+        if image_input in ("latest", "recent", "last", "", None):
+            latest_path = find_latest_image()
+            if not latest_path:
+                raise FileNotFoundError("Could not auto-detect any recently generated image. Please specify an image path.")
+            img = Image.open(latest_path)
+            return img, latest_path.name
+
         if isinstance(image_input, (str, Path)):
             path_str = str(image_input).strip()
             # Check if it's base64 encoded

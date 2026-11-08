@@ -13,6 +13,7 @@ from instagram_mcp.image_processor import (
     prepare_for_instagram,
     analyze_image,
     load_image,
+    find_latest_image,
     ImageProcessingError
 )
 from instagram_mcp.uploader import get_public_image_url, UploadError
@@ -22,7 +23,9 @@ app = MCPServer(
     name="instagram-poster",
     instructions=(
         "Instagram Publishing MCP Server. Allows AI agents to validate, format, and post "
-        "AI-generated images, carousels, and stories to Instagram via the official Meta Graph API."
+        "AI-generated images, carousels, and stories to Instagram via the official Meta Graph API. "
+        "When the user asks to post 'the image you just generated', pass image_source='latest' "
+        "or call get_latest_image() to automatically select the most recent AI visual!"
     )
 )
 
@@ -36,16 +39,26 @@ def _is_url(source: str) -> bool:
 
 
 async def _resolve_image_to_url(
-    image_source: str,
+    image_source: Optional[str] = "latest",
     target_type: str = "feed",
     auto_format: bool = True,
     fit_mode: str = "pad",
     caption_overlay: Optional[str] = None
 ) -> str:
     """
-    Takes an image source (local file, URL, or base64 data) and returns a publicly
+    Takes an image source (local file, URL, base64, or 'latest') and returns a publicly
     accessible HTTPS URL ready for the Instagram Graph API.
     """
+    # Auto-detect latest image if 'latest', 'recent', or omitted
+    if not image_source or image_source.strip().lower() in ("latest", "recent", "last"):
+        latest_file = find_latest_image()
+        if not latest_file:
+            raise FileNotFoundError(
+                "No recently generated or saved images found on the system. "
+                "Please specify an image file path or URL."
+            )
+        image_source = str(latest_file)
+
     # If it's already a URL, auto_format is False, and no overlay requested
     if _is_url(image_source) and not auto_format and not caption_overlay:
         return image_source
@@ -86,8 +99,41 @@ async def _resolve_image_to_url(
 
 
 @app.tool()
+def get_latest_image() -> str:
+    """
+    Inspect the most recently created or generated image on the system.
+    Useful when the user asks to 'post the image you just created' without providing a path.
+
+    Returns:
+        JSON string with the file path, dimensions, format, and aspect ratio.
+    """
+    latest = find_latest_image()
+    if not latest:
+        return json.dumps({
+            "status": "not_found",
+            "message": "No recent images found in workspace, temporary, or downloads folders."
+        }, indent=2)
+
+    try:
+        img, _ = load_image(str(latest))
+        analysis = analyze_image(img)
+        return json.dumps({
+            "status": "found",
+            "file_path": str(latest),
+            "file_name": latest.name,
+            "file_size_kb": round(latest.stat().st_size / 1024, 2),
+            **analysis
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Error inspecting latest image: {e}"
+        }, indent=2)
+
+
+@app.tool()
 async def post_image(
-    image_source: str,
+    image_source: str = "latest",
     caption: Optional[str] = None,
     caption_overlay: Optional[str] = None,
     auto_format: bool = True,
@@ -96,10 +142,10 @@ async def post_image(
     dry_run: bool = False
 ) -> str:
     """
-    Publish a single image to an Instagram Business or Creator account feed.
+    Publish an image to an Instagram Business or Creator account feed.
 
     Args:
-        image_source: Path to a local image file (e.g. '/tmp/ai_artwork.png'), a base64 data string, or a public HTTPS URL.
+        image_source: Path to image file, base64 data, or public URL. Set to 'latest' (default) to automatically use the image the agent just generated!
         caption: Caption text for the post, including hashtags and emojis (max 2,200 chars). If omitted, falls back to DEFAULT_CAPTION from .env.
         caption_overlay: Optional text to burn/render directly onto the image visual as a stylish banner.
         auto_format: If True (recommended for AI images), automatically adjusts aspect ratio to Instagram feed limits (between 4:5 and 1.91:1) and converts to RGB JPEG.
@@ -308,7 +354,7 @@ async def post_carousel(
 
 @app.tool()
 async def post_story(
-    image_source: str,
+    image_source: str = "latest",
     caption: Optional[str] = None,
     caption_overlay: Optional[str] = None,
     auto_format: bool = True,
