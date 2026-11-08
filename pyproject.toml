@@ -23,3 +23,4 @@ instagram-mcp = "instagram_mcp.server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["instagram_mcp*"]
+

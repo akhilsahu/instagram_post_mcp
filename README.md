@@ -27,10 +27,11 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that a
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `post_image` | Publish a single image to Instagram feed | `image_source`, `caption`, `auto_format`, `fit_mode`, `location_id` |
-| `post_carousel` | Publish 2–10 images as a swipeable carousel | `images`, `caption`, `auto_format`, `fit_mode` |
-| `post_story` | Publish an image to Instagram Stories (9:16) | `image_source`, `auto_format`, `fit_mode` |
-| `format_and_preview_image` | Validate & prepare image locally without publishing | `image_source`, `target_type`, `fit_mode`, `output_path` |
+| `post_image` | Publish a single image to Instagram feed | `image_source`, `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
+| `post_carousel` | Publish 2–10 images as a swipeable carousel | `images`, `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
+| `post_story` | Publish an image to Instagram Stories (9:16) | `image_source`, `caption`, `caption_overlay`, `auto_format`, `fit_mode`, `dry_run` |
+| `format_caption` | Format and validate caption & hashtags (2,200 char limit) | `text`, `hashtags`, `call_to_action` |
+| `format_and_preview_image` | Validate & prepare image locally without publishing | `image_source`, `caption_overlay`, `target_type`, `fit_mode`, `output_path` |
 | `get_instagram_profile` | Get connected Instagram account details | *None* |
 | `get_recent_posts` | Retrieve recent published posts and metrics | `limit` (default: 10) |
 | `check_setup_status` | Verify credentials and server health | *None* |
@@ -187,3 +188,4 @@ insta_post_mcp/
     ├── instagram_client.py      # Meta Instagram Graph API client
     └── server.py                # FastMCP server & tool definitions
 ```
+

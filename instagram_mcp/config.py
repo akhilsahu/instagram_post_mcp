@@ -27,6 +27,7 @@ class Settings:
     # Processing configuration
     auto_format_images: bool = os.getenv("AUTO_FORMAT_IMAGES", "true").lower() in ("true", "1", "yes")
     dry_run: bool = os.getenv("DRY_RUN", "false").lower() in ("true", "1", "yes")
+    default_caption: str = os.getenv("DEFAULT_CAPTION", "").strip()
     temp_dir: Path = Path(os.getenv("INSTA_TEMP_DIR", "/tmp/insta_mcp"))
 
     def validate_meta_credentials(self) -> None:

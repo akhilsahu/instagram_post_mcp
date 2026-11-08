@@ -39,18 +39,19 @@ async def _resolve_image_to_url(
     image_source: str,
     target_type: str = "feed",
     auto_format: bool = True,
-    fit_mode: str = "pad"
+    fit_mode: str = "pad",
+    caption_overlay: Optional[str] = None
 ) -> str:
     """
     Takes an image source (local file, URL, or base64 data) and returns a publicly
     accessible HTTPS URL ready for the Instagram Graph API.
     """
-    # If it's already a URL and auto_format is False, return it directly
-    if _is_url(image_source) and not auto_format:
+    # If it's already a URL, auto_format is False, and no overlay requested
+    if _is_url(image_source) and not auto_format and not caption_overlay:
         return image_source
 
-    # If it's a URL and auto_format is True, download it to temp first for formatting
-    if _is_url(image_source) and auto_format:
+    # If it's a URL and formatting or overlay is requested
+    if _is_url(image_source) and (auto_format or caption_overlay):
         async with httpx.AsyncClient(timeout=30.0) as http_c:
             resp = await http_c.get(image_source)
             if resp.status_code != 200:
@@ -59,16 +60,18 @@ async def _resolve_image_to_url(
         local_prep = prepare_for_instagram(
             image_bytes,
             target_type=target_type,
-            fit_mode=fit_mode
+            fit_mode=fit_mode,
+            caption_overlay=caption_overlay
         )
         return await get_public_image_url(local_prep)
 
     # If it's a local file or base64
-    if auto_format:
+    if auto_format or caption_overlay:
         local_prep = prepare_for_instagram(
             image_source,
             target_type=target_type,
-            fit_mode=fit_mode
+            fit_mode=fit_mode,
+            caption_overlay=caption_overlay
         )
     else:
         # Save raw to temp file if not already a path
@@ -85,7 +88,8 @@ async def _resolve_image_to_url(
 @app.tool()
 async def post_image(
     image_source: str,
-    caption: str = "",
+    caption: Optional[str] = None,
+    caption_overlay: Optional[str] = None,
     auto_format: bool = True,
     fit_mode: str = "pad",
     location_id: Optional[str] = None,
@@ -96,7 +100,8 @@ async def post_image(
 
     Args:
         image_source: Path to a local image file (e.g. '/tmp/ai_artwork.png'), a base64 data string, or a public HTTPS URL.
-        caption: Caption text for the post, including hashtags and emojis.
+        caption: Caption text for the post, including hashtags and emojis (max 2,200 chars). If omitted, falls back to DEFAULT_CAPTION from .env.
+        caption_overlay: Optional text to burn/render directly onto the image visual as a stylish banner.
         auto_format: If True (recommended for AI images), automatically adjusts aspect ratio to Instagram feed limits (between 4:5 and 1.91:1) and converts to RGB JPEG.
         fit_mode: How to adjust aspect ratio if outside 4:5 - 1.91:1. 'pad' adds a stylish blurred background border (preserves entire artwork), 'crop' center-crops the image.
         location_id: Optional Facebook Page ID for location tagging.
@@ -106,6 +111,7 @@ async def post_image(
         JSON string containing the post result: permalink, post_id, and status.
     """
     try:
+        final_caption = caption if caption is not None else settings.default_caption
         is_dry_run = dry_run or settings.dry_run
 
         if is_dry_run:
@@ -113,7 +119,8 @@ async def post_image(
             local_prep = prepare_for_instagram(
                 image_source,
                 target_type="feed",
-                fit_mode=fit_mode
+                fit_mode=fit_mode,
+                caption_overlay=caption_overlay
             )
             processed_img, _ = load_image(str(local_prep))
             analysis = analyze_image(processed_img)
@@ -122,7 +129,8 @@ async def post_image(
                 "message": "[DRY RUN] Image formatted and verified successfully! Meta publishing was simulated.",
                 "simulated_post_id": "18099887766554433",
                 "simulated_permalink": "https://www.instagram.com/p/DRYRUN_SAMPLE/",
-                "caption": caption,
+                "caption": final_caption,
+                "caption_overlay": caption_overlay,
                 "processed_image_file": str(local_prep),
                 "image_analysis": analysis,
                 "hint": "Set valid INSTAGRAM_ACCESS_TOKEN and call with dry_run=False to post live to Instagram."
@@ -135,13 +143,14 @@ async def post_image(
             image_source=image_source,
             target_type="feed",
             auto_format=auto_format,
-            fit_mode=fit_mode
+            fit_mode=fit_mode,
+            caption_overlay=caption_overlay
         )
 
         # Step 2: Create media container in Meta Graph API
         creation_id = await client.create_image_container(
             image_url=public_url,
-            caption=caption,
+            caption=final_caption,
             location_id=location_id
         )
 
@@ -159,7 +168,7 @@ async def post_image(
             "message": "Image published successfully to Instagram!",
             "post_id": media_id,
             "permalink": details.get("permalink", f"https://www.instagram.com/p/{media_id}"),
-            "caption": caption,
+            "caption": final_caption,
             "timestamp": details.get("timestamp")
         }, indent=2)
 
@@ -180,7 +189,8 @@ async def post_image(
 @app.tool()
 async def post_carousel(
     images: List[str],
-    caption: str = "",
+    caption: Optional[str] = None,
+    caption_overlay: Optional[str] = None,
     auto_format: bool = True,
     fit_mode: str = "pad",
     location_id: Optional[str] = None,
@@ -191,7 +201,8 @@ async def post_carousel(
 
     Args:
         images: List of image sources (local file paths, base64 strings, or HTTPS URLs).
-        caption: Post caption with hashtags and emojis.
+        caption: Post caption with hashtags and emojis. If omitted, falls back to DEFAULT_CAPTION from .env.
+        caption_overlay: Optional text overlay burned onto the first slide of the carousel.
         auto_format: If True, automatically optimizes each image for Instagram dimensions and format.
         fit_mode: 'pad' (blurred padding) or 'crop' (center crop).
         location_id: Optional Facebook Page ID for location tagging.
@@ -212,12 +223,19 @@ async def post_carousel(
                 "message": "Instagram carousels support a maximum of 10 images."
             })
 
+        final_caption = caption if caption is not None else settings.default_caption
         is_dry_run = dry_run or settings.dry_run
 
         if is_dry_run:
             processed_items = []
-            for img_src in images:
-                local_prep = prepare_for_instagram(img_src, target_type="feed", fit_mode=fit_mode)
+            for idx, img_src in enumerate(images):
+                overlay = caption_overlay if idx == 0 else None
+                local_prep = prepare_for_instagram(
+                    img_src,
+                    target_type="feed",
+                    fit_mode=fit_mode,
+                    caption_overlay=overlay
+                )
                 p_img, _ = load_image(str(local_prep))
                 processed_items.append({
                     "file_path": str(local_prep),
@@ -228,7 +246,7 @@ async def post_carousel(
                 "message": f"[DRY RUN] Carousel with {len(images)} images formatted and verified! Meta publishing simulated.",
                 "simulated_post_id": "18099887766554499",
                 "simulated_permalink": "https://www.instagram.com/p/DRYRUN_CAROUSEL/",
-                "caption": caption,
+                "caption": final_caption,
                 "items": processed_items,
                 "hint": "Set valid INSTAGRAM_ACCESS_TOKEN and call with dry_run=False to post live to Instagram."
             }, indent=2)
@@ -238,11 +256,13 @@ async def post_carousel(
         # Step 1: Prepare and upload each item
         item_ids = []
         for idx, img_src in enumerate(images, 1):
+            overlay = caption_overlay if idx == 1 else None
             public_url = await _resolve_image_to_url(
                 image_source=img_src,
                 target_type="feed",
                 auto_format=auto_format,
-                fit_mode=fit_mode
+                fit_mode=fit_mode,
+                caption_overlay=overlay
             )
             item_id = await client.create_image_container(
                 image_url=public_url,
@@ -257,7 +277,7 @@ async def post_carousel(
         # Step 3: Create parent carousel container
         carousel_id = await client.create_carousel_container(
             item_container_ids=item_ids,
-            caption=caption,
+            caption=final_caption,
             location_id=location_id
         )
 
@@ -275,7 +295,7 @@ async def post_carousel(
             "message": f"Carousel with {len(images)} images published successfully!",
             "post_id": media_id,
             "permalink": details.get("permalink", f"https://www.instagram.com/p/{media_id}"),
-            "caption": caption
+            "caption": final_caption
         }, indent=2)
 
     except Exception as e:
@@ -289,6 +309,8 @@ async def post_carousel(
 @app.tool()
 async def post_story(
     image_source: str,
+    caption: Optional[str] = None,
+    caption_overlay: Optional[str] = None,
     auto_format: bool = True,
     fit_mode: str = "pad",
     dry_run: bool = False
@@ -298,6 +320,8 @@ async def post_story(
 
     Args:
         image_source: Path to local image file, base64 data, or HTTPS URL.
+        caption: Optional text caption. Because Instagram Stories API does not support native text fields, any caption passed here is automatically burned onto the story visual as a clean typographic banner!
+        caption_overlay: Explicit overlay text (overrides caption if provided).
         auto_format: Automatically formats image to 9:16 vertical story aspect ratio.
         fit_mode: 'pad' (blurred padding) or 'crop' (center crop).
         dry_run: If True (or if DRY_RUN=true in .env), formats the story image without calling Meta API, simulating a successful story upload.
@@ -306,13 +330,15 @@ async def post_story(
         JSON string with story publication status.
     """
     try:
+        final_overlay = caption_overlay or caption
         is_dry_run = dry_run or settings.dry_run
 
         if is_dry_run:
             local_prep = prepare_for_instagram(
                 image_source,
                 target_type="story",
-                fit_mode=fit_mode
+                fit_mode=fit_mode,
+                caption_overlay=final_overlay
             )
             processed_img, _ = load_image(str(local_prep))
             analysis = analyze_image(processed_img)
@@ -320,6 +346,7 @@ async def post_story(
                 "status": "dry_run_success",
                 "message": "[DRY RUN] Story image formatted to 9:16 vertical ratio! Meta publishing simulated.",
                 "simulated_story_id": "18099887766554477",
+                "caption_overlay": final_overlay,
                 "processed_image_file": str(local_prep),
                 "image_analysis": analysis,
                 "hint": "Set valid INSTAGRAM_ACCESS_TOKEN and call with dry_run=False to post live to Instagram."
@@ -331,7 +358,8 @@ async def post_story(
             image_source=image_source,
             target_type="story",
             auto_format=auto_format,
-            fit_mode=fit_mode
+            fit_mode=fit_mode,
+            caption_overlay=final_overlay
         )
 
         creation_id = await client.create_story_container(image_url=public_url)
@@ -341,7 +369,8 @@ async def post_story(
         return json.dumps({
             "status": "success",
             "message": "Story published successfully to Instagram!",
-            "story_id": media_id
+            "story_id": media_id,
+            "caption_overlay": final_overlay
         }, indent=2)
 
     except Exception as e:
@@ -353,18 +382,78 @@ async def post_story(
 
 
 @app.tool()
+def format_caption(
+    text: str,
+    hashtags: Optional[List[str]] = None,
+    call_to_action: Optional[str] = None
+) -> str:
+    """
+    Format and validate an Instagram caption with emojis, clean line breaks, and hashtags.
+    Verifies Instagram's 2,200 character limit and maximum 30 hashtags.
+
+    Args:
+        text: The main caption body or description.
+        hashtags: Optional list of hashtags (e.g. ['#AIArt', '#DigitalArtist', 'Creativity']).
+        call_to_action: Optional closing CTA (e.g. 'Drop your thoughts below! 👇' or 'Link in bio').
+
+    Returns:
+        JSON string containing the formatted caption and validation metrics.
+    """
+    # Clean up text
+    clean_text = text.strip()
+
+    # Clean and format hashtags
+    formatted_tags = []
+    if hashtags:
+        for tag in hashtags:
+            clean_tag = tag.strip().lstrip("#")
+            if clean_tag:
+                formatted_tags.append(f"#{clean_tag}")
+
+    parts = [clean_text]
+    if call_to_action:
+        parts.append(call_to_action.strip())
+
+    if formatted_tags:
+        # Separate hashtags with a line break for Instagram aesthetic
+        parts.append(" ".join(formatted_tags))
+
+    final_caption = "\n\n".join(parts)
+    char_count = len(final_caption)
+    tag_count = len(formatted_tags)
+
+    is_valid = (char_count <= 2200) and (tag_count <= 30)
+    warnings = []
+    if char_count > 2200:
+        warnings.append(f"Caption exceeds Instagram's 2,200 character limit ({char_count} chars).")
+    if tag_count > 30:
+        warnings.append(f"Instagram allows a maximum of 30 hashtags (found {tag_count}).")
+
+    return json.dumps({
+        "status": "success" if is_valid else "warning",
+        "caption": final_caption,
+        "character_count": char_count,
+        "hashtag_count": tag_count,
+        "is_valid_for_instagram": is_valid,
+        "warnings": warnings
+    }, indent=2)
+
+
+@app.tool()
 def format_and_preview_image(
     image_source: str,
+    caption_overlay: Optional[str] = None,
     target_type: str = "feed",
     fit_mode: str = "pad",
     output_path: Optional[str] = None
 ) -> str:
     """
     Inspects and prepares an AI-generated image for Instagram without publishing.
-    Verifies aspect ratio, format, dimensions, and saves an Instagram-ready JPEG copy.
+    Verifies aspect ratio, format, dimensions, optionally renders caption overlay, and saves an Instagram-ready JPEG copy.
 
     Args:
         image_source: Path to local image file or base64 string.
+        caption_overlay: Optional text overlay burned onto the visual as a banner.
         target_type: 'feed' (aspect ratio 4:5 to 1.91:1) or 'story' (9:16 vertical).
         fit_mode: 'pad' (blurred background padding) or 'crop' (center crop).
         output_path: Optional destination file path for the optimized JPEG.
@@ -380,6 +469,7 @@ def format_and_preview_image(
             image_source,
             target_type=target_type,
             fit_mode=fit_mode,
+            caption_overlay=caption_overlay,
             output_path=output_path
         )
 

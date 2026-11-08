@@ -5,7 +5,7 @@ import base64
 import uuid
 from pathlib import Path
 from typing import Tuple, Optional, Union
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image, ImageOps, ImageFilter, ImageDraw, ImageFont
 
 from instagram_mcp.config import settings
 
@@ -159,11 +159,112 @@ def crop_to_aspect_ratio(img: Image.Image, target_aspect_ratio: float) -> Image.
     return img.crop(box)
 
 
+def add_caption_overlay(
+    img: Image.Image,
+    caption: str,
+    position: str = "bottom",
+    font_size: Optional[int] = None,
+    text_color: Tuple[int, int, int] = (255, 255, 255)
+) -> Image.Image:
+    """
+    Renders a stylish typographic caption banner over the image.
+    Useful for Stories or branding AI artwork directly on the visual.
+    """
+    if not caption or not caption.strip():
+        return img
+
+    canvas = img.convert("RGBA")
+    width, height = canvas.size
+
+    # Calculate proportional font size if not provided
+    calculated_size = font_size or max(24, int(width / 28))
+    
+    # Try system fonts (macOS / Linux / fallback)
+    font = None
+    system_fonts = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNS.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "Helvetica", "Arial"
+    ]
+    for fp in system_fonts:
+        try:
+            font = ImageFont.truetype(fp, calculated_size)
+            break
+        except Exception:
+            continue
+    if font is None:
+        try:
+            font = ImageFont.load_default(size=calculated_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+    # Wrap text into lines fitting within 85% of image width
+    words = caption.strip().split()
+    lines = []
+    current_line = []
+    max_text_width = int(width * 0.85)
+
+    temp_draw = ImageDraw.Draw(canvas)
+    for word in words:
+        test_line = " ".join(current_line + [word])
+        bbox = temp_draw.textbbox((0, 0), test_line, font=font)
+        line_w = bbox[2] - bbox[0]
+        if line_w <= max_text_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(" ".join(current_line))
+            current_line = [word]
+    if current_line:
+        lines.append(" ".join(current_line))
+
+    # Calculate total text block height
+    line_spacing = int(calculated_size * 0.35)
+    total_text_height = len(lines) * calculated_size + (len(lines) - 1) * line_spacing
+    banner_padding = int(calculated_size * 0.8)
+    banner_height = total_text_height + (banner_padding * 2)
+
+    # Determine Y position of the banner
+    if position == "top":
+        banner_top = int(height * 0.08)
+    elif position == "center":
+        banner_top = (height - banner_height) // 2
+    else:  # bottom
+        banner_top = height - banner_height - int(height * 0.08)
+
+    # Draw semi-transparent dark backdrop for legibility
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    
+    # Rounded rectangle banner
+    banner_margin = int(width * 0.05)
+    overlay_draw.rounded_rectangle(
+        [banner_margin, banner_top, width - banner_margin, banner_top + banner_height],
+        radius=16,
+        fill=(15, 15, 20, 185)
+    )
+
+    # Render lines of text centered
+    curr_y = banner_top + banner_padding
+    for line in lines:
+        bbox = overlay_draw.textbbox((0, 0), line, font=font)
+        lw = bbox[2] - bbox[0]
+        lx = (width - lw) // 2
+        overlay_draw.text((lx, curr_y), line, fill=(*text_color, 255), font=font)
+        curr_y += calculated_size + line_spacing
+
+    # Composite overlay onto canvas and convert back to RGB
+    combined = Image.alpha_composite(canvas, overlay)
+    return combined.convert("RGB")
+
+
 def prepare_for_instagram(
     image_input: Union[str, bytes, Path, io.BytesIO],
     target_type: str = "feed",
     fit_mode: str = "pad",
     bg_style: str = "blur",
+    caption_overlay: Optional[str] = None,
     output_path: Optional[Union[str, Path]] = None,
     quality: int = 95
 ) -> Path:
@@ -171,9 +272,10 @@ def prepare_for_instagram(
     Prepares any image (including AI generated ones) for Instagram publishing:
     1. Converts format to RGB JPEG
     2. Adjusts aspect ratio (feed: 0.8 - 1.91, story: 9:16)
-    3. Resizes if exceeds maximum dimensions
-    4. Compresses if size > 8MB
-    5. Saves as a clean JPEG ready for Graph API upload.
+    3. Optionally renders a typographic caption overlay onto the image
+    4. Resizes if exceeds maximum dimensions
+    5. Compresses if size > 8MB
+    6. Saves as a clean JPEG ready for Graph API upload.
     
     Returns the Path to the processed image file.
     """
@@ -206,6 +308,10 @@ def prepare_for_instagram(
             else:
                 img = pad_to_aspect_ratio(img, MAX_ASPECT_RATIO_FEED, bg_style=bg_style)
     
+    # Apply optional typographic caption overlay
+    if caption_overlay:
+        img = add_caption_overlay(img, caption_overlay)
+
     # Scale down if dimensions are excessively large (e.g. > 2160px)
     max_dim = max(img.size)
     if max_dim > RECOMMENDED_MAX_DIMENSION:

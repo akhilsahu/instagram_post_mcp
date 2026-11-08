@@ -1,9 +1,11 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
+# Distribution / packaging
 build/
 develop-eggs/
 dist/
@@ -20,25 +22,42 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
+# Virtual Environments
 .venv/
 env/
 venv/
 ENV/
+env.bak/
+venv.bak/
 
-# Environment variables & secrets
+# Environment variables & secrets (CRITICAL: Never commit your access tokens)
 .env
-.env.local
+.env.*
+!.env.example
 
-# Temp images
+# Temporary images and test files
 /tmp/
 *.jpg
 *.jpeg
 *.png
 *.webp
+*.gif
 
-# IDE
+# Logs
+*.log
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
